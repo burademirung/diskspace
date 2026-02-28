@@ -3,5 +3,6 @@ import AppKit
 import DiskSpaceKit
 
 let app = NSApplication.shared
-app.setActivationPolicy(.accessory)
-print("DiskSpace: build OK")
+let delegate = AppDelegate()
+app.delegate = delegate
+app.run()
