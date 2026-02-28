@@ -117,19 +117,19 @@ public final class PopoverViewController: NSViewController,
         checkCol.maxWidth = 28
         tableView.addTableColumn(checkCol)
 
+        // Size column (shown before path so sizes are visible on the left)
+        let sizeCol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("size"))
+        sizeCol.title = "Size"
+        sizeCol.width = 80
+        sizeCol.minWidth = 60
+        tableView.addTableColumn(sizeCol)
+
         // Path column
         let pathCol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("path"))
         pathCol.title = "Path"
         pathCol.width = 280
         pathCol.minWidth = 150
         tableView.addTableColumn(pathCol)
-
-        // Size column
-        let sizeCol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("size"))
-        sizeCol.title = "Size"
-        sizeCol.width = 80
-        sizeCol.minWidth = 60
-        tableView.addTableColumn(sizeCol)
 
         tableView.dataSource = self
         tableView.delegate = self
