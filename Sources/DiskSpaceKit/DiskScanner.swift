@@ -103,7 +103,9 @@ public final class DiskScanner {
             guard let rp = realpath(root.path, &buf) else { return root }
             return URL(fileURLWithPath: String(cString: rp))
         }()
+        let rootPath = root.path
         let keys: Set<URLResourceKey> = [
+            .totalFileAllocatedSizeKey,
             .fileSizeKey,
             .isDirectoryKey,
             .isRegularFileKey,
@@ -143,12 +145,13 @@ public final class DiskScanner {
             }
 
             let isRegular = values.isRegularFile ?? false
-            let fileSize = Int64(values.fileSize ?? 0)
+            // Prefer allocated size (actual disk usage) over logical size
+            let fileSize = Int64(values.totalFileAllocatedSize ?? values.fileSize ?? 0)
 
             if isRegular && fileSize > 0 {
-                // Accumulate size to this file's directory and all ancestors
+                // Accumulate size to this file's directory and all ancestors up to scan root
                 var dirPath = fileURL.deletingLastPathComponent().path
-                while !dirPath.isEmpty {
+                while dirPath.hasPrefix(rootPath) && !dirPath.isEmpty {
                     var entry = folderSizes[dirPath, default: (size: 0, count: 0)]
                     entry.size += fileSize
                     entry.count += 1

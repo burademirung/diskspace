@@ -56,9 +56,10 @@ struct DiskScannerTests {
 
         let files = await scanner.largeFiles
         // Should find bigfile.dat (60MB) and huge.dat (200MB), NOT small.txt or medium.dat
+        // Sizes use allocated (on-disk) size which may be slightly larger due to block alignment
         #expect(files.count == 2)
-        #expect(files[0].size == 200_000_000)  // huge.dat first (sorted by size desc)
-        #expect(files[1].size == 60_000_000)   // bigfile.dat second
+        #expect(files[0].size >= 200_000_000)  // huge.dat first (sorted by size desc)
+        #expect(files[1].size >= 60_000_000)   // bigfile.dat second
     }
 
     @Test("Scanner accumulates folder sizes")
@@ -74,15 +75,15 @@ struct DiskScannerTests {
         }
 
         let folders = await scanner.largeFolders
-        // root folder should have total size = 100 + 60M + 30M + 200M
+        // root folder should have total size >= 100 + 60M + 30M + 200M (allocated sizes may be larger)
         let rootFolder = folders.first { $0.url.path == root.path }
         #expect(rootFolder != nil)
-        #expect(rootFolder!.totalSize == 290_000_100)
+        #expect(rootFolder!.totalSize >= 290_000_100)
 
-        // subdir should have 30M + 200M = 230M
+        // subdir should have >= 30M + 200M = 230M
         let subFolder = folders.first { $0.url.path == root.appendingPathComponent("subdir").path }
         #expect(subFolder != nil)
-        #expect(subFolder!.totalSize == 230_000_000)
+        #expect(subFolder!.totalSize >= 230_000_000)
     }
 
     @Test("Scanner reports done state with correct counts")
@@ -117,11 +118,12 @@ struct DiskScannerTests {
         await scanner.cancel()
 
         let state = await scanner.scanState
-        if case .idle = state {
-            #expect(true)
-        } else {
-            // Might have completed if very fast; either idle or done is OK
-            #expect(true)
+        switch state {
+        case .idle, .done:
+            // Expected: either cancelled back to idle, or completed before cancellation
+            break
+        case .scanning:
+            Issue.record("Expected idle or done after cancel, got scanning")
         }
     }
 
@@ -140,6 +142,6 @@ struct DiskScannerTests {
 
         let files = await scanner.largeFiles
         #expect(files.count == 1)
-        #expect(files[0].size == 200_000_000)
+        #expect(files[0].size >= 200_000_000)
     }
 }
