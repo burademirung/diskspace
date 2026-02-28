@@ -94,7 +94,6 @@ public final class PopoverViewController: NSViewController,
     }
 
     private func setupToolbar() {
-        tabControl.selectedSegment = 0
         tabControl.segmentStyle = .rounded
 
         for option in thresholdOptions {
@@ -325,7 +324,10 @@ public final class PopoverViewController: NSViewController,
     // MARK: - Data updates
 
     private func handleScannerUpdate() {
-        updateSummary()
+        // Only re-read disk info on state transitions, not on every progress tick
+        if !scanner.scanState.isScanning {
+            updateSummary()
+        }
         updateStatusBar()
         filterAndReload()
     }
@@ -359,8 +361,15 @@ public final class PopoverViewController: NSViewController,
 
     private func filterAndReload() {
         let threshold = scanner.minimumFileSize
+        // Client-side filter: raising threshold hides files; lowering requires re-scan
         displayedFiles = scanner.largeFiles.filter { $0.size >= threshold }
         displayedFolders = scanner.largeFolders
+
+        // Remove stale checked URLs that are no longer in displayed results
+        let validURLs = Set(displayedFiles.map(\.url)).union(displayedFolders.map(\.url))
+        checkedURLs.formIntersection(validURLs)
+        updateDeleteButton()
+
         tableView.reloadData()
     }
 
@@ -407,24 +416,43 @@ public final class PopoverViewController: NSViewController,
             path = item.displayPath
         }
 
+        let id = tableColumn!.identifier
+
         switch columnID {
         case "check":
-            let checkbox = NSButton(checkboxWithTitle: "", target: self, action: #selector(checkboxToggled(_:)))
+            let checkbox = (tableView.makeView(withIdentifier: id, owner: nil) as? NSButton)
+                ?? {
+                    let btn = NSButton(checkboxWithTitle: "", target: self, action: #selector(checkboxToggled(_:)))
+                    btn.identifier = id
+                    return btn
+                }()
             checkbox.tag = row
             checkbox.state = checkedURLs.contains(url) ? .on : .off
             return checkbox
 
         case "path":
-            let textField = NSTextField(labelWithString: path)
-            textField.font = .systemFont(ofSize: 12)
-            textField.lineBreakMode = .byTruncatingMiddle
+            let textField = (tableView.makeView(withIdentifier: id, owner: nil) as? NSTextField)
+                ?? {
+                    let tf = NSTextField(labelWithString: "")
+                    tf.identifier = id
+                    tf.font = .systemFont(ofSize: 12)
+                    tf.lineBreakMode = .byTruncatingMiddle
+                    return tf
+                }()
+            textField.stringValue = path
             textField.toolTip = url.path
             return textField
 
         case "size":
-            let textField = NSTextField(labelWithString: size)
-            textField.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
-            textField.alignment = .right
+            let textField = (tableView.makeView(withIdentifier: id, owner: nil) as? NSTextField)
+                ?? {
+                    let tf = NSTextField(labelWithString: "")
+                    tf.identifier = id
+                    tf.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+                    tf.alignment = .right
+                    return tf
+                }()
+            textField.stringValue = size
             return textField
 
         default:
