@@ -1,5 +1,21 @@
 import Foundation
 
+// ByteCountFormatter is safe to share: created once, string(fromByteCount:) is effectively read-only.
+nonisolated(unsafe) private let sharedSizeFormatter: ByteCountFormatter = {
+    let f = ByteCountFormatter()
+    f.countStyle = .file
+    return f
+}()
+
+private func displayPath(for url: URL) -> String {
+    let home = NSHomeDirectory()
+    let path = url.path
+    if path.hasPrefix(home) {
+        return "~" + path.dropFirst(home.count)
+    }
+    return path
+}
+
 public struct FileItem: Sendable {
     public let url: URL
     public let size: Int64
@@ -11,23 +27,12 @@ public struct FileItem: Sendable {
         self.modificationDate = modificationDate
     }
 
-    nonisolated(unsafe) private static let formatter: ByteCountFormatter = {
-        let f = ByteCountFormatter()
-        f.countStyle = .file
-        return f
-    }()
-
     public var formattedSize: String {
-        Self.formatter.string(fromByteCount: size)
+        sharedSizeFormatter.string(fromByteCount: size)
     }
 
     public var displayPath: String {
-        let home = NSHomeDirectory()
-        let path = url.path
-        if path.hasPrefix(home) {
-            return "~" + path.dropFirst(home.count)
-        }
-        return path
+        DiskSpaceKit.displayPath(for: url)
     }
 }
 
@@ -42,23 +47,12 @@ public struct FolderItem: Sendable {
         self.itemCount = itemCount
     }
 
-    nonisolated(unsafe) private static let formatter: ByteCountFormatter = {
-        let f = ByteCountFormatter()
-        f.countStyle = .file
-        return f
-    }()
-
     public var formattedSize: String {
-        Self.formatter.string(fromByteCount: totalSize)
+        sharedSizeFormatter.string(fromByteCount: totalSize)
     }
 
     public var displayPath: String {
-        let home = NSHomeDirectory()
-        let path = url.path
-        if path.hasPrefix(home) {
-            return "~" + path.dropFirst(home.count)
-        }
-        return path
+        DiskSpaceKit.displayPath(for: url)
     }
 }
 
