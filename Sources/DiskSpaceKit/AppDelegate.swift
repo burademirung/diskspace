@@ -1,5 +1,6 @@
 // Sources/DiskSpaceKit/AppDelegate.swift
 import AppKit
+import ServiceManagement
 
 @MainActor
 public final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -7,22 +8,23 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var barView: StatusBarView?
     private var updateTimer: Timer?
-
-    // Menu items that need updating
-    private var freeItem: NSMenuItem?
-    private var usedItem: NSMenuItem?
-    private var totalItem: NSMenuItem?
+    private var popover: NSPopover?
+    private let scanner = DiskScanner()
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
-        setupMenu()
+        setupPopover()
         startTimer()
         refresh()
+        scanner.startScan()
     }
 
     public func applicationWillTerminate(_ notification: Notification) {
         updateTimer?.invalidate()
+        scanner.cancel()
     }
+
+    // MARK: - Status Bar
 
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -34,44 +36,41 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         button.addSubview(view)
         button.frame = view.frame
         barView = view
+
+        button.target = self
+        button.action = #selector(statusBarClicked(_:))
+
+        // Ensure button sends action on click rather than showing a menu
+        statusItem?.menu = nil
     }
 
-    private func setupMenu() {
-        let menu = NSMenu()
+    @objc private func statusBarClicked(_ sender: Any?) {
+        togglePopover()
+    }
 
-        // Volume name header
-        do {
-            let name = (try? DiskInfo.volumeName()) ?? "Macintosh HD"
-            let header = NSMenuItem(title: name, action: nil, keyEquivalent: "")
-            header.isEnabled = false
-            let font = NSFont.boldSystemFont(ofSize: 13)
-            header.attributedTitle = NSAttributedString(string: name, attributes: [.font: font])
-            menu.addItem(header)
+    // MARK: - Popover
+
+    private func setupPopover() {
+        let vc = PopoverViewController(scanner: scanner)
+        let pop = NSPopover()
+        pop.contentViewController = vc
+        pop.contentSize = NSSize(width: 420, height: 520)
+        pop.behavior = .transient // closes when clicking outside
+        pop.animates = true
+        popover = pop
+    }
+
+    private func togglePopover() {
+        guard let popover, let button = statusItem?.button else { return }
+
+        if popover.isShown {
+            popover.performClose(nil)
+        } else {
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         }
-
-        menu.addItem(NSMenuItem.separator())
-
-        // Info rows
-        freeItem = NSMenuItem(title: "Free:  --", action: nil, keyEquivalent: "")
-        freeItem?.isEnabled = false
-        menu.addItem(freeItem!)
-
-        usedItem = NSMenuItem(title: "Used:  --", action: nil, keyEquivalent: "")
-        usedItem?.isEnabled = false
-        menu.addItem(usedItem!)
-
-        totalItem = NSMenuItem(title: "Total: --", action: nil, keyEquivalent: "")
-        totalItem?.isEnabled = false
-        menu.addItem(totalItem!)
-
-        menu.addItem(NSMenuItem.separator())
-
-        // Quit
-        let quitItem = NSMenuItem(title: "Quit DiskSpace", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        menu.addItem(quitItem)
-
-        statusItem?.menu = menu
     }
+
+    // MARK: - Timer
 
     private func startTimer() {
         updateTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] _ in
@@ -83,22 +82,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func refresh() {
         guard let info = try? DiskInfo.readBootVolume() else { return }
-
         barView?.diskInfo = info
-
-        // Use monospaced digits for alignment
-        let font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
-        freeItem?.attributedTitle = NSAttributedString(
-            string: "Free:  \(info.formattedFree)",
-            attributes: [.font: font]
-        )
-        usedItem?.attributedTitle = NSAttributedString(
-            string: "Used:  \(info.formattedUsed)",
-            attributes: [.font: font]
-        )
-        totalItem?.attributedTitle = NSAttributedString(
-            string: "Total: \(info.formattedTotal)",
-            attributes: [.font: font]
-        )
     }
 }
