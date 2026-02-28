@@ -117,6 +117,9 @@ struct DiskScannerTests {
         try await Task.sleep(for: .milliseconds(100))
         await scanner.cancel()
 
+        // Give the cancelled task time to propagate state back to MainActor
+        try await Task.sleep(for: .milliseconds(200))
+
         let state = await scanner.scanState
         switch state {
         case .idle, .done:
