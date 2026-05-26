@@ -13,10 +13,10 @@ struct DiskScannerTests {
     ///       medium.dat     (30 MB — below threshold)
     ///       huge.dat       (200 MB — above threshold)
     private func makeTempTree() throws -> URL {
-        let fm = FileManager.default
-        let root = fm.temporaryDirectory.appendingPathComponent("DiskScannerTest-\(UUID().uuidString)")
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent("DiskScannerTest-\(UUID().uuidString)")
         let subdir = root.appendingPathComponent("subdir")
-        try fm.createDirectory(at: subdir, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: subdir, withIntermediateDirectories: true)
 
         // small.txt — 100 bytes
         try Data(repeating: 0x41, count: 100).write(to: root.appendingPathComponent("small.txt"))
@@ -32,9 +32,9 @@ struct DiskScannerTests {
 
         // Resolve symlinks (including /var -> /private/var) to match
         // paths returned by FileManager.enumerator
-        var resolved = [CChar](repeating: 0, count: Int(PATH_MAX))
-        guard let rp = realpath(root.path, &resolved) else { return root }
-        return URL(fileURLWithPath: String(cString: rp))
+        var buffer = [CChar](repeating: 0, count: Int(PATH_MAX))
+        guard let resolvedPath = realpath(root.path, &buffer) else { return root }
+        return URL(fileURLWithPath: String(cString: resolvedPath))
     }
 
     private func cleanupTempTree(_ root: URL) {

@@ -4,51 +4,39 @@ import AppKit
 public final class PopoverViewController: NSViewController,
     NSTableViewDataSource, NSTableViewDelegate {
 
-    private let scanner: DiskScanner
+    let scanner: DiskScanner
 
     // UI elements
-    private let summaryLabel = NSTextField(labelWithString: "")
-    private let summaryBar = NSProgressIndicator()
-    private let tabControl = NSSegmentedControl(
+    let summaryLabel = NSTextField(labelWithString: "")
+    let summaryBar = NSProgressIndicator()
+    let tabControl = NSSegmentedControl(
         labels: ["Folders", "Files"],
         trackingMode: .selectOne,
         target: nil,
         action: nil
     )
-    private let thresholdLabel = NSTextField(labelWithString: "Min size:")
-    private let thresholdPicker = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let scrollView = NSScrollView()
-    private let tableView = NSTableView()
-    private let statusLabel = NSTextField(labelWithString: "Ready")
-    private let scanButton = NSButton(
-        title: "Scan",
-        target: nil,
-        action: nil
-    )
-    private let cancelButton = NSButton(
-        title: "Cancel",
-        target: nil,
-        action: nil
-    )
-    private let deleteButton = NSButton(
-        title: "Move to Trash",
-        target: nil,
-        action: nil
-    )
+    let thresholdLabel = NSTextField(labelWithString: "Min size:")
+    let thresholdPicker = NSPopUpButton(frame: .zero, pullsDown: false)
+    let scrollView = NSScrollView()
+    let tableView = NSTableView()
+    let statusLabel = NSTextField(labelWithString: "Ready")
+    let scanButton = NSButton(title: "Scan", target: nil, action: nil)
+    let cancelButton = NSButton(title: "Cancel", target: nil, action: nil)
+    let deleteButton = NSButton(title: "Move to Trash", target: nil, action: nil)
 
     // State
-    private var showingFiles = false
-    private var checkedURLs: Set<URL> = []
-    private var displayedFiles: [FileItem] = []
-    private var displayedFolders: [FolderItem] = []
+    var showingFiles = false
+    var checkedURLs: Set<URL> = []
+    var displayedFiles: [FileItem] = []
+    var displayedFolders: [FolderItem] = []
 
     // Threshold options in bytes
-    private let thresholdOptions: [(label: String, bytes: Int64)] = [
+    let thresholdOptions: [(label: String, bytes: Int64)] = [
         ("10 MB", 10_000_000),
         ("50 MB", 50_000_000),
         ("100 MB", 100_000_000),
         ("500 MB", 500_000_000),
-        ("1 GB", 1_000_000_000),
+        ("1 GB", 1_000_000_000)
     ]
 
     public init(scanner: DiskScanner) {
@@ -60,8 +48,7 @@ public final class PopoverViewController: NSViewController,
     required init?(coder: NSCoder) { fatalError() }
 
     public override func loadView() {
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 520))
-        self.view = container
+        view = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 520))
         setupSummary()
         setupToolbar()
         setupTable()
@@ -80,179 +67,16 @@ public final class PopoverViewController: NSViewController,
         handleScannerUpdate()
     }
 
-    // MARK: - Setup
-
-    private func setupSummary() {
-        summaryBar.style = .bar
-        summaryBar.isIndeterminate = false
-        summaryBar.minValue = 0
-        summaryBar.maxValue = 100
-        summaryBar.doubleValue = 0
-
-        summaryLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
-        summaryLabel.alignment = .left
-    }
-
-    private func setupToolbar() {
-        tabControl.segmentStyle = .rounded
-
-        for option in thresholdOptions {
-            thresholdPicker.addItem(withTitle: option.label)
-        }
-
-        scanButton.bezelStyle = .rounded
-        scanButton.setButtonType(.momentaryPushIn)
-
-        cancelButton.bezelStyle = .rounded
-        cancelButton.setButtonType(.momentaryPushIn)
-        cancelButton.isHidden = true
-    }
-
-    private func setupTable() {
-        // Checkbox column
-        let checkCol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("check"))
-        checkCol.title = ""
-        checkCol.width = 28
-        checkCol.minWidth = 28
-        checkCol.maxWidth = 28
-        tableView.addTableColumn(checkCol)
-
-        // Size column (shown before path so sizes are visible on the left)
-        let sizeCol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("size"))
-        sizeCol.title = "Size"
-        sizeCol.width = 80
-        sizeCol.minWidth = 60
-        tableView.addTableColumn(sizeCol)
-
-        // Path column
-        let pathCol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("path"))
-        pathCol.title = "Path"
-        pathCol.width = 280
-        pathCol.minWidth = 150
-        tableView.addTableColumn(pathCol)
-
-        tableView.dataSource = self
-        tableView.delegate = self
-        tableView.usesAlternatingRowBackgroundColors = true
-        tableView.allowsMultipleSelection = false
-        tableView.rowHeight = 22
-        tableView.headerView = NSTableHeaderView()
-
-        // Context menu
-        let contextMenu = NSMenu()
-        contextMenu.addItem(
-            NSMenuItem(
-                title: "Reveal in Finder",
-                action: #selector(revealInFinder(_:)),
-                keyEquivalent: ""
-            )
-        )
-        tableView.menu = contextMenu
-
-        scrollView.documentView = tableView
-        scrollView.hasVerticalScroller = true
-        scrollView.autohidesScrollers = true
-    }
-
-    private func setupStatusBar() {
-        statusLabel.font = .systemFont(ofSize: 11)
-        statusLabel.textColor = .secondaryLabelColor
-        statusLabel.lineBreakMode = .byTruncatingTail
-
-        deleteButton.bezelStyle = .rounded
-        deleteButton.setButtonType(.momentaryPushIn)
-        deleteButton.isEnabled = false
-    }
-
-    private func layoutSubviews() {
-        let views: [NSView] = [
-            summaryBar, summaryLabel, tabControl, thresholdLabel,
-            thresholdPicker, scrollView, statusLabel, scanButton,
-            cancelButton, deleteButton
-        ]
-        for v in views {
-            v.translatesAutoresizingMaskIntoConstraints = false
-            view.addSubview(v)
-        }
-
-        let pad: CGFloat = 12
-        let smallPad: CGFloat = 8
-
-        NSLayoutConstraint.activate([
-            // Summary bar
-            summaryBar.topAnchor.constraint(equalTo: view.topAnchor, constant: pad),
-            summaryBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: pad),
-            summaryBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -pad),
-
-            // Summary label
-            summaryLabel.topAnchor.constraint(equalTo: summaryBar.bottomAnchor, constant: 4),
-            summaryLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: pad),
-            summaryLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -pad),
-
-            // Tab control + Scan button row
-            tabControl.topAnchor.constraint(equalTo: summaryLabel.bottomAnchor, constant: smallPad),
-            tabControl.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: pad),
-
-            scanButton.centerYAnchor.constraint(equalTo: tabControl.centerYAnchor),
-            scanButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -pad),
-
-            cancelButton.centerYAnchor.constraint(equalTo: tabControl.centerYAnchor),
-            cancelButton.trailingAnchor.constraint(equalTo: scanButton.leadingAnchor, constant: -smallPad),
-
-            // Threshold row
-            thresholdLabel.topAnchor.constraint(equalTo: tabControl.bottomAnchor, constant: smallPad),
-            thresholdLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: pad),
-
-            thresholdPicker.centerYAnchor.constraint(equalTo: thresholdLabel.centerYAnchor),
-            thresholdPicker.leadingAnchor.constraint(equalTo: thresholdLabel.trailingAnchor, constant: 4),
-
-            // Table (scrollView)
-            scrollView.topAnchor.constraint(equalTo: thresholdLabel.bottomAnchor, constant: smallPad),
-            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 0),
-            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: 0),
-
-            // Status bar row
-            statusLabel.topAnchor.constraint(equalTo: scrollView.bottomAnchor, constant: smallPad),
-            statusLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: pad),
-            statusLabel.trailingAnchor.constraint(equalTo: deleteButton.leadingAnchor, constant: -smallPad),
-
-            // Delete button
-            deleteButton.centerYAnchor.constraint(equalTo: statusLabel.centerYAnchor),
-            deleteButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -pad),
-            deleteButton.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -pad),
-
-            // Table height fills remaining space
-            scrollView.bottomAnchor.constraint(equalTo: statusLabel.topAnchor, constant: -smallPad),
-        ])
-    }
-
     // MARK: - Actions
 
-    private func wireActions() {
-        tabControl.target = self
-        tabControl.action = #selector(tabChanged(_:))
-
-        thresholdPicker.target = self
-        thresholdPicker.action = #selector(thresholdChanged(_:))
-
-        scanButton.target = self
-        scanButton.action = #selector(scanTapped(_:))
-
-        cancelButton.target = self
-        cancelButton.action = #selector(cancelTapped(_:))
-
-        deleteButton.target = self
-        deleteButton.action = #selector(deleteTapped(_:))
-    }
-
-    @objc private func tabChanged(_ sender: NSSegmentedControl) {
+    @objc func tabChanged(_ sender: NSSegmentedControl) {
         showingFiles = sender.selectedSegment == 1
         checkedURLs.removeAll()
         updateDeleteButton()
         tableView.reloadData()
     }
 
-    @objc private func thresholdChanged(_ sender: NSPopUpButton) {
+    @objc func thresholdChanged(_ sender: NSPopUpButton) {
         let idx = sender.indexOfSelectedItem
         guard idx >= 0 && idx < thresholdOptions.count else { return }
         let newThreshold = thresholdOptions[idx].bytes
@@ -260,16 +84,16 @@ public final class PopoverViewController: NSViewController,
         filterAndReload()
     }
 
-    @objc private func scanTapped(_ sender: Any?) {
+    @objc func scanTapped(_ sender: Any?) {
         checkedURLs.removeAll()
         scanner.startScan()
     }
 
-    @objc private func cancelTapped(_ sender: Any?) {
+    @objc func cancelTapped(_ sender: Any?) {
         scanner.cancel()
     }
 
-    @objc private func deleteTapped(_ sender: Any?) {
+    @objc func deleteTapped(_ sender: Any?) {
         guard !checkedURLs.isEmpty else { return }
         let count = checkedURLs.count
 
@@ -289,30 +113,14 @@ public final class PopoverViewController: NSViewController,
         updateDeleteButton()
     }
 
-    @objc private func revealInFinder(_ sender: Any?) {
+    @objc func revealInFinder(_ sender: Any?) {
         let row = tableView.clickedRow
-        guard row >= 0 else { return }
-        let url: URL
-        if showingFiles {
-            guard row < displayedFiles.count else { return }
-            url = displayedFiles[row].url
-        } else {
-            guard row < displayedFolders.count else { return }
-            url = displayedFolders[row].url
-        }
+        guard let url = urlAt(row: row) else { return }
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
-    @objc private func checkboxToggled(_ sender: NSButton) {
-        let row = sender.tag
-        let url: URL
-        if showingFiles {
-            guard row < displayedFiles.count else { return }
-            url = displayedFiles[row].url
-        } else {
-            guard row < displayedFolders.count else { return }
-            url = displayedFolders[row].url
-        }
+    @objc func checkboxToggled(_ sender: NSButton) {
+        guard let url = urlAt(row: sender.tag) else { return }
         if sender.state == .on {
             checkedURLs.insert(url)
         } else {
@@ -323,7 +131,7 @@ public final class PopoverViewController: NSViewController,
 
     // MARK: - Data updates
 
-    private func handleScannerUpdate() {
+    func handleScannerUpdate() {
         // Only re-read disk info on state transitions, not on every progress tick
         if !scanner.scanState.isScanning {
             updateSummary()
@@ -333,10 +141,9 @@ public final class PopoverViewController: NSViewController,
     }
 
     private func updateSummary() {
-        if let info = try? DiskInfo.readBootVolume() {
-            summaryBar.doubleValue = info.usedFraction * 100
-            summaryLabel.stringValue = "\(info.formattedFree) free of \(info.formattedTotal)"
-        }
+        guard let info = try? DiskInfo.readBootVolume() else { return }
+        summaryBar.doubleValue = info.usedFraction * 100
+        summaryLabel.stringValue = "\(info.formattedFree) free of \(info.formattedTotal)"
     }
 
     private func updateStatusBar() {
@@ -359,7 +166,7 @@ public final class PopoverViewController: NSViewController,
         }
     }
 
-    private func filterAndReload() {
+    func filterAndReload() {
         let threshold = scanner.minimumFileSize
         // Client-side filter: raising threshold hides files; lowering requires re-scan
         displayedFiles = scanner.largeFiles.filter { $0.size >= threshold }
@@ -373,90 +180,19 @@ public final class PopoverViewController: NSViewController,
         tableView.reloadData()
     }
 
-    private func updateDeleteButton() {
+    func updateDeleteButton() {
         let count = checkedURLs.count
         deleteButton.isEnabled = count > 0
-        if count > 0 {
-            deleteButton.title = "Move to Trash (\(count))"
-        } else {
-            deleteButton.title = "Move to Trash"
-        }
+        deleteButton.title = count > 0 ? "Move to Trash (\(count))" : "Move to Trash"
     }
 
-    // MARK: - NSTableViewDataSource
+    // MARK: - Helpers
 
-    public func numberOfRows(in tableView: NSTableView) -> Int {
-        showingFiles ? displayedFiles.count : displayedFolders.count
-    }
-
-    // MARK: - NSTableViewDelegate
-
-    public func tableView(
-        _ tableView: NSTableView,
-        viewFor tableColumn: NSTableColumn?,
-        row: Int
-    ) -> NSView? {
-        guard let columnID = tableColumn?.identifier.rawValue else { return nil }
-
-        let url: URL
-        let size: String
-        let path: String
-
+    private func urlAt(row: Int) -> URL? {
+        guard row >= 0 else { return nil }
         if showingFiles {
-            guard row < displayedFiles.count else { return nil }
-            let item = displayedFiles[row]
-            url = item.url
-            size = item.formattedSize
-            path = item.displayPath
-        } else {
-            guard row < displayedFolders.count else { return nil }
-            let item = displayedFolders[row]
-            url = item.url
-            size = item.formattedSize
-            path = item.displayPath
+            return row < displayedFiles.count ? displayedFiles[row].url : nil
         }
-
-        let id = tableColumn!.identifier
-
-        switch columnID {
-        case "check":
-            let checkbox = (tableView.makeView(withIdentifier: id, owner: nil) as? NSButton)
-                ?? {
-                    let btn = NSButton(checkboxWithTitle: "", target: self, action: #selector(checkboxToggled(_:)))
-                    btn.identifier = id
-                    return btn
-                }()
-            checkbox.tag = row
-            checkbox.state = checkedURLs.contains(url) ? .on : .off
-            return checkbox
-
-        case "path":
-            let textField = (tableView.makeView(withIdentifier: id, owner: nil) as? NSTextField)
-                ?? {
-                    let tf = NSTextField(labelWithString: "")
-                    tf.identifier = id
-                    tf.font = .systemFont(ofSize: 12)
-                    tf.lineBreakMode = .byTruncatingMiddle
-                    return tf
-                }()
-            textField.stringValue = path
-            textField.toolTip = url.path
-            return textField
-
-        case "size":
-            let textField = (tableView.makeView(withIdentifier: id, owner: nil) as? NSTextField)
-                ?? {
-                    let tf = NSTextField(labelWithString: "")
-                    tf.identifier = id
-                    tf.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
-                    tf.alignment = .right
-                    return tf
-                }()
-            textField.stringValue = size
-            return textField
-
-        default:
-            return nil
-        }
+        return row < displayedFolders.count ? displayedFolders[row].url : nil
     }
 }

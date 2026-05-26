@@ -89,32 +89,30 @@ public final class DiskScanner {
 
     // MARK: - Scanning (runs off MainActor)
 
+    // Keys requested from the enumerator. Declared once so the same set is
+    // reused for both enumerator-init and per-URL resourceValues calls.
+    nonisolated private static let resourceKeys: Set<URLResourceKey> = [
+        .totalFileAllocatedSizeKey,
+        .fileSizeKey,
+        .isDirectoryKey,
+        .isRegularFileKey,
+        .contentModificationDateKey
+    ]
+
+    // Paths skipped during scan (other volumes, device nodes, VM swap).
+    nonisolated private static let skipPrefixes = ["/Volumes/", "/dev/", "/private/var/vm/"]
+
     nonisolated private static func performScan(
         root: URL,
         threshold: Int64,
         continuation: AsyncStream<ScanUpdate>.Continuation
     ) {
-        let fm = FileManager.default
+        let resolvedRoot = resolveSymlinks(root)
+        let rootPath = resolvedRoot.path
 
-        // Resolve symlinks (e.g., /var -> /private/var) so paths from
-        // FileManager.enumerator match the root path consistently.
-        let root: URL = {
-            var buf = [CChar](repeating: 0, count: Int(PATH_MAX))
-            guard let rp = realpath(root.path, &buf) else { return root }
-            return URL(fileURLWithPath: String(cString: rp))
-        }()
-        let rootPath = root.path
-        let keys: Set<URLResourceKey> = [
-            .totalFileAllocatedSizeKey,
-            .fileSizeKey,
-            .isDirectoryKey,
-            .isRegularFileKey,
-            .contentModificationDateKey
-        ]
-
-        guard let enumerator = fm.enumerator(
-            at: root,
-            includingPropertiesForKeys: Array(keys),
+        guard let enumerator = FileManager.default.enumerator(
+            at: resolvedRoot,
+            includingPropertiesForKeys: Array(resourceKeys),
             options: [],
             errorHandler: { _, _ in true } // skip errors, keep going
         ) else {
@@ -126,53 +124,24 @@ public final class DiskScanner {
         var folderSizes: [String: (size: Int64, count: Int)] = [:]
         var scannedCount = 0
 
-        // Paths to skip (avoid other volumes, device nodes, VM swap)
-        let skipPrefixes = ["/Volumes/", "/dev/", "/private/var/vm/"]
-
         for case let fileURL as URL in enumerator {
             if Task.isCancelled { break }
 
-            let path = fileURL.path
-
-            // Skip special system paths
-            if skipPrefixes.contains(where: { path.hasPrefix($0) }) {
+            if skipPrefixes.contains(where: { fileURL.path.hasPrefix($0) }) {
                 enumerator.skipDescendants()
                 continue
             }
 
-            guard let values = try? fileURL.resourceValues(forKeys: keys) else {
-                continue
-            }
-
-            let isRegular = values.isRegularFile ?? false
-            // Prefer allocated size (actual disk usage) over logical size
-            let fileSize = Int64(values.totalFileAllocatedSize ?? values.fileSize ?? 0)
-
-            if isRegular && fileSize > 0 {
-                // Accumulate size to this file's directory and all ancestors up to scan root
-                var dirPath = fileURL.deletingLastPathComponent().path
-                while dirPath.hasPrefix(rootPath) && !dirPath.isEmpty {
-                    var entry = folderSizes[dirPath, default: (size: 0, count: 0)]
-                    entry.size += fileSize
-                    entry.count += 1
-                    folderSizes[dirPath] = entry
-                    let parent = (dirPath as NSString).deletingLastPathComponent
-                    if parent == dirPath { break }
-                    dirPath = parent
-                }
-
-                // Collect large files
-                if fileSize >= threshold {
-                    files.append(FileItem(
-                        url: fileURL,
-                        size: fileSize,
-                        modificationDate: values.contentModificationDate ?? .distantPast
-                    ))
-                }
-            }
+            processEntry(
+                fileURL: fileURL,
+                rootPath: rootPath,
+                threshold: threshold,
+                files: &files,
+                folderSizes: &folderSizes
+            )
 
             scannedCount += 1
-            if scannedCount % 1000 == 0 {
+            if scannedCount.isMultiple(of: 1000) {
                 continuation.yield(.progress(scannedCount: scannedCount))
             }
         }
@@ -182,9 +151,72 @@ public final class DiskScanner {
             return
         }
 
-        // Sort results
-        files.sort { $0.size > $1.size }
+        emitResults(files: files, folderSizes: folderSizes, continuation: continuation)
+    }
 
+    /// Resolve symlinks (e.g., /var -> /private/var) so paths from
+    /// `FileManager.enumerator` match the root path consistently.
+    nonisolated private static func resolveSymlinks(_ url: URL) -> URL {
+        var buffer = [CChar](repeating: 0, count: Int(PATH_MAX))
+        guard let resolvedPath = realpath(url.path, &buffer) else { return url }
+        return URL(fileURLWithPath: String(cString: resolvedPath))
+    }
+
+    nonisolated private static func processEntry(
+        fileURL: URL,
+        rootPath: String,
+        threshold: Int64,
+        files: inout [FileItem],
+        folderSizes: inout [String: (size: Int64, count: Int)]
+    ) {
+        guard let values = try? fileURL.resourceValues(forKeys: resourceKeys),
+              values.isRegularFile == true else { return }
+
+        // Prefer allocated size (actual disk usage) over logical size.
+        let fileSize = Int64(values.totalFileAllocatedSize ?? values.fileSize ?? 0)
+        guard fileSize > 0 else { return }
+
+        accumulateFolderSizes(
+            for: fileURL,
+            fileSize: fileSize,
+            rootPath: rootPath,
+            into: &folderSizes
+        )
+
+        if fileSize >= threshold {
+            files.append(FileItem(
+                url: fileURL,
+                size: fileSize,
+                modificationDate: values.contentModificationDate ?? .distantPast
+            ))
+        }
+    }
+
+    /// Add `fileSize` to every ancestor directory of `fileURL` up to `rootPath`.
+    nonisolated private static func accumulateFolderSizes(
+        for fileURL: URL,
+        fileSize: Int64,
+        rootPath: String,
+        into folderSizes: inout [String: (size: Int64, count: Int)]
+    ) {
+        var dirPath = fileURL.deletingLastPathComponent().path
+        while dirPath.hasPrefix(rootPath) && !dirPath.isEmpty {
+            var entry = folderSizes[dirPath, default: (size: 0, count: 0)]
+            entry.size += fileSize
+            entry.count += 1
+            folderSizes[dirPath] = entry
+            let parent = (dirPath as NSString).deletingLastPathComponent
+            if parent == dirPath { break }
+            dirPath = parent
+        }
+    }
+
+    nonisolated private static func emitResults(
+        files: [FileItem],
+        folderSizes: [String: (size: Int64, count: Int)],
+        continuation: AsyncStream<ScanUpdate>.Continuation
+    ) {
+        let sortedFiles = files.sorted { $0.size > $1.size }
         let folders = folderSizes
             .map { FolderItem(
                 url: URL(fileURLWithPath: $0.key),
@@ -194,7 +226,7 @@ public final class DiskScanner {
             .sorted { $0.totalSize > $1.totalSize }
             .prefix(500)
 
-        continuation.yield(.completed(files: files, folders: Array(folders)))
+        continuation.yield(.completed(files: sortedFiles, folders: Array(folders)))
         continuation.finish()
     }
 }

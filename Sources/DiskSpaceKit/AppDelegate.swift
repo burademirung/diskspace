@@ -51,9 +51,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Popover
 
     private func setupPopover() {
-        let vc = PopoverViewController(scanner: scanner)
+        let viewController = PopoverViewController(scanner: scanner)
         let pop = NSPopover()
-        pop.contentViewController = vc
+        pop.contentViewController = viewController
         pop.contentSize = NSSize(width: 420, height: 520)
         pop.behavior = .transient // closes when clicking outside
         pop.animates = true

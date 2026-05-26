@@ -2,9 +2,9 @@ import Foundation
 
 // ByteCountFormatter is safe to share: created once, string(fromByteCount:) is effectively read-only.
 nonisolated(unsafe) private let sharedSizeFormatter: ByteCountFormatter = {
-    let f = ByteCountFormatter()
-    f.countStyle = .file
-    return f
+    let formatter = ByteCountFormatter()
+    formatter.countStyle = .file
+    return formatter
 }()
 
 private func displayPath(for url: URL) -> String {

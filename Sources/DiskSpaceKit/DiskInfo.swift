@@ -33,10 +33,10 @@ public struct DiskInfo: Sendable {
     }
 
     private nonisolated(unsafe) static let formatter: ByteCountFormatter = {
-        let f = ByteCountFormatter()
-        f.countStyle = .file
-        f.allowedUnits = [.useGB, .useTB]
-        return f
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        formatter.allowedUnits = [.useGB, .useTB]
+        return formatter
     }()
 
     public var formattedFree: String {
