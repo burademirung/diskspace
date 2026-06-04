@@ -26,9 +26,10 @@ helps you find and reclaim large files and folders.
 
 ### Download (recommended)
 
-Grab the latest `DiskSpace.dmg` from the [Releases](../../releases) page, open it,
-and drag **DiskSpace** to **Applications**. The build is signed and notarized by
-Apple, so it runs without Gatekeeper warnings.
+**[⬇︎ Download the latest DiskSpace.dmg](../../releases/latest)**
+
+Open the DMG and drag **DiskSpace** to **Applications**. The build is signed and
+notarized by Apple, so it runs without Gatekeeper warnings — just open it.
 
 ### Build from source
 
