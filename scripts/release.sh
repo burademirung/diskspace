@@ -99,7 +99,10 @@ echo "==> Stapling"
 xcrun stapler staple "$DMG"
 xcrun stapler validate "$DMG"
 
-echo "==> Verifying Gatekeeper acceptance"
-spctl -a -t open --context context:primary-signature -vv "$DMG" || true
+echo "==> Verifying Gatekeeper acceptance (assess the app inside the DMG)"
+MOUNT="$(mktemp -d)"
+hdiutil attach "$DMG" -nobrowse -quiet -mountpoint "$MOUNT"
+spctl -a -t exec -vv "$MOUNT/$APP_NAME.app" || true
+hdiutil detach "$MOUNT" -quiet || true
 
 echo "==> Done. Distributable: $DMG"
