@@ -136,10 +136,7 @@ public enum ScanRootResolver {
 
     /// The volume whose free space the menu-bar gauge reflects.
     public static func monitoredVolumeURL(preferences: Preferences) -> URL {
-        if let path = preferences.selectedVolumePath {
-            return URL(fileURLWithPath: path)
-        }
-        return URL(fileURLWithPath: "/")
+        URL(fileURLWithPath: preferences.selectedVolumePath ?? "/")
     }
 
     /// The directory a scan should start from, per the chosen scope.

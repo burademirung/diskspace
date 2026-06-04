@@ -11,6 +11,8 @@ helps you find and reclaim large files and folders.
   volume you choose. Green / yellow / red as space runs low.
 - **Disk analyzer** — scan the whole disk, your Home folder, or any chosen
   folder; see the largest files and folders, sorted by size, name, or date.
+- **Fast** — parallel, multi-core scanning (~4× faster than a naive walk),
+  bounded for APFS. See [the research](docs/RESEARCH-scan-speedup.md).
 - **Search & drill-down** — filter results by path; double-click a folder to
   scan into it.
 - **Cleanup** — one-click reclaim of common space hogs (caches, Xcode
@@ -68,6 +70,16 @@ missing. Without it, scans silently skip protected areas.
 
 DiskSpace runs entirely on your Mac. It makes **no network connections**, has
 **zero third-party dependencies**, and collects nothing.
+
+## Development
+
+- `scripts/package.sh` — build + ad-hoc sign + install to `/Applications` (local).
+- `scripts/release.sh` — universal build → Developer ID sign → notarize → DMG
+  (see [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)).
+- `scripts/benchmark-scan.swift` — measure scan strategies on your hardware.
+- `swift test` — unit tests (the Swift Testing module ships with full Xcode).
+
+Release notes: [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

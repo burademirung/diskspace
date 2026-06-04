@@ -21,7 +21,7 @@ cd "$ROOT"
 
 APP_NAME="DiskSpace"
 BUNDLE_ID="com.diskspace.app"
-VERSION="1.1"
+VERSION="1.2"
 DIST="$ROOT/dist"
 STAGE="$DIST/stage"
 APP="$STAGE/$APP_NAME.app"
