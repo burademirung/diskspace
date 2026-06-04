@@ -1,6 +1,13 @@
 import Foundation
 import AppKit
 
+/// Running totals accumulated for a directory during a scan.
+private struct FolderAccumulator {
+    var size: Int64 = 0
+    var count: Int = 0
+    var date: Date = .distantPast
+}
+
 @MainActor
 public final class DiskScanner {
 
@@ -134,13 +141,17 @@ public final class DiskScanner {
         }
 
         var files: [FileItem] = []
-        var folderSizes: [String: (size: Int64, count: Int)] = [:]
+        var folderSizes: [String: FolderAccumulator] = [:]
         var scannedCount = 0
+
+        // Skip other volumes / device nodes / VM swap only on a whole-disk scan;
+        // a scoped scan (Home, a chosen folder, an external volume) scans fully.
+        let applySystemSkips = (rootPath == "/")
 
         for case let fileURL as URL in enumerator {
             if Task.isCancelled { break }
 
-            if skipPrefixes.contains(where: { fileURL.path.hasPrefix($0) }) {
+            if applySystemSkips, skipPrefixes.contains(where: { fileURL.path.hasPrefix($0) }) {
                 enumerator.skipDescendants()
                 continue
             }
@@ -180,7 +191,7 @@ public final class DiskScanner {
         rootPath: String,
         threshold: Int64,
         files: inout [FileItem],
-        folderSizes: inout [String: (size: Int64, count: Int)]
+        folderSizes: inout [String: FolderAccumulator]
     ) {
         guard let values = try? fileURL.resourceValues(forKeys: resourceKeys),
               values.isRegularFile == true else { return }
@@ -189,19 +200,18 @@ public final class DiskScanner {
         let fileSize = Int64(values.totalFileAllocatedSize ?? values.fileSize ?? 0)
         guard fileSize > 0 else { return }
 
+        let modificationDate = values.contentModificationDate ?? .distantPast
+
         accumulateFolderSizes(
             for: fileURL,
             fileSize: fileSize,
+            modificationDate: modificationDate,
             rootPath: rootPath,
             into: &folderSizes
         )
 
         if fileSize >= threshold {
-            files.append(FileItem(
-                url: fileURL,
-                size: fileSize,
-                modificationDate: values.contentModificationDate ?? .distantPast
-            ))
+            files.append(FileItem(url: fileURL, size: fileSize, modificationDate: modificationDate))
         }
     }
 
@@ -209,17 +219,19 @@ public final class DiskScanner {
     nonisolated private static func accumulateFolderSizes(
         for fileURL: URL,
         fileSize: Int64,
+        modificationDate: Date,
         rootPath: String,
-        into folderSizes: inout [String: (size: Int64, count: Int)]
+        into folderSizes: inout [String: FolderAccumulator]
     ) {
         // Match on a path-boundary ("rootPath/") so a sibling like
         // "/x/foobar" is not mistaken for a child of root "/x/foo".
         let rootBoundary = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
         var dirPath = fileURL.deletingLastPathComponent().path
         while dirPath == rootPath || dirPath.hasPrefix(rootBoundary) {
-            var entry = folderSizes[dirPath, default: (size: 0, count: 0)]
+            var entry = folderSizes[dirPath, default: FolderAccumulator()]
             entry.size += fileSize
             entry.count += 1
+            if modificationDate > entry.date { entry.date = modificationDate }
             folderSizes[dirPath] = entry
             if dirPath == rootPath { break } // don't ascend past the scan root
             let parent = (dirPath as NSString).deletingLastPathComponent
@@ -230,7 +242,7 @@ public final class DiskScanner {
 
     nonisolated private static func emitResults(
         files: [FileItem],
-        folderSizes: [String: (size: Int64, count: Int)],
+        folderSizes: [String: FolderAccumulator],
         continuation: AsyncStream<ScanUpdate>.Continuation
     ) {
         let sortedFiles = files.sorted { $0.size > $1.size }
@@ -238,7 +250,8 @@ public final class DiskScanner {
             .map { FolderItem(
                 url: URL(fileURLWithPath: $0.key),
                 totalSize: $0.value.size,
-                itemCount: $0.value.count
+                itemCount: $0.value.count,
+                modificationDate: $0.value.date
             )}
             .sorted { $0.totalSize > $1.totalSize }
             .prefix(500)

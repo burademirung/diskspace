@@ -52,7 +52,10 @@ public struct DiskInfo: Sendable {
     }
 
     public static func readBootVolume() throws -> DiskInfo {
-        let url = URL(fileURLWithPath: "/")
+        try readVolume(at: URL(fileURLWithPath: "/"))
+    }
+
+    public static func readVolume(at url: URL) throws -> DiskInfo {
         let values = try url.resourceValues(forKeys: [
             .volumeAvailableCapacityForImportantUsageKey,
             .volumeTotalCapacityKey
@@ -63,8 +66,44 @@ public struct DiskInfo: Sendable {
     }
 
     public static func volumeName() throws -> String {
-        let url = URL(fileURLWithPath: "/")
+        try volumeName(at: URL(fileURLWithPath: "/"))
+    }
+
+    public static func volumeName(at url: URL) throws -> String {
         let values = try url.resourceValues(forKeys: [.volumeNameKey])
         return values.volumeName ?? "Macintosh HD"
+    }
+}
+
+/// A mounted, user-browsable volume the app can monitor and scan.
+public struct VolumeInfo: Sendable, Identifiable {
+    public let url: URL
+    public let name: String
+
+    public var id: String { url.path }
+
+    public init(url: URL, name: String) {
+        self.url = url
+        self.name = name
+    }
+}
+
+extension DiskInfo {
+    /// All mounted, browsable, non-empty volumes (boot volume + externals).
+    public static func mountedVolumes() -> [VolumeInfo] {
+        let keys: [URLResourceKey] = [
+            .volumeNameKey, .volumeIsBrowsableKey, .volumeTotalCapacityKey
+        ]
+        let urls = FileManager.default.mountedVolumeURLs(
+            includingResourceValuesForKeys: keys,
+            options: [.skipHiddenVolumes]
+        ) ?? []
+
+        return urls.compactMap { url in
+            guard let values = try? url.resourceValues(forKeys: Set(keys)),
+                  values.volumeIsBrowsable == true,
+                  (values.volumeTotalCapacity ?? 0) > 0 else { return nil }
+            return VolumeInfo(url: url, name: values.volumeName ?? url.lastPathComponent)
+        }
     }
 }

@@ -7,6 +7,14 @@ nonisolated(unsafe) private let sharedSizeFormatter: ByteCountFormatter = {
     return formatter
 }()
 
+// Shared, single-creation date formatter (DateFormatter is Sendable).
+private let sharedDateFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.dateStyle = .short
+    formatter.timeStyle = .none
+    return formatter
+}()
+
 private func displayPath(for url: URL) -> String {
     let home = NSHomeDirectory()
     let path = url.path
@@ -31,6 +39,10 @@ public struct FileItem: Sendable {
         sharedSizeFormatter.string(fromByteCount: size)
     }
 
+    public var formattedDate: String {
+        modificationDate == .distantPast ? "" : sharedDateFormatter.string(from: modificationDate)
+    }
+
     public var displayPath: String {
         DiskSpaceKit.displayPath(for: url)
     }
@@ -40,15 +52,21 @@ public struct FolderItem: Sendable {
     public let url: URL
     public let totalSize: Int64
     public let itemCount: Int
+    public let modificationDate: Date
 
-    public init(url: URL, totalSize: Int64, itemCount: Int) {
+    public init(url: URL, totalSize: Int64, itemCount: Int, modificationDate: Date = .distantPast) {
         self.url = url
         self.totalSize = totalSize
         self.itemCount = itemCount
+        self.modificationDate = modificationDate
     }
 
     public var formattedSize: String {
         sharedSizeFormatter.string(fromByteCount: totalSize)
+    }
+
+    public var formattedDate: String {
+        modificationDate == .distantPast ? "" : sharedDateFormatter.string(from: modificationDate)
     }
 
     public var displayPath: String {

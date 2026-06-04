@@ -7,6 +7,18 @@ public final class StatusBarView: NSView {
         didSet { needsDisplay = true }
     }
 
+    public var mode: MenuBarMode = .freeSpace {
+        didSet { needsDisplay = true }
+    }
+
+    private var displayText: String {
+        switch mode {
+        case .freeSpace: return diskInfo.formattedFree
+        case .usedSpace: return diskInfo.formattedUsed
+        case .percentageFree: return "\(Int((diskInfo.freeFraction * 100).rounded()))%"
+        }
+    }
+
     private let barWidth: CGFloat = 40
     private let barHeight: CGFloat = 10
     private let padding: CGFloat = 4
@@ -50,7 +62,7 @@ public final class StatusBarView: NSView {
         }
 
         // Free space text
-        let text = diskInfo.formattedFree
+        let text = displayText
         let attrs = textAttributes()
         let textOrigin = NSPoint(
             x: padding + barWidth + textBarGap,

@@ -42,6 +42,11 @@ line_length:
   error: 160
   ignores_comments: true
 
+# Auto Layout constraint blocks are legitimately long.
+function_body_length:
+  warning: 80
+  error: 120
+
 type_body_length:
   warning: 350
   error: 450
