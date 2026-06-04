@@ -22,7 +22,6 @@ cd "$ROOT"
 APP_NAME="DiskSpace"
 BUNDLE_ID="com.diskspace.app"
 VERSION="1.1"
-RELEASE_DIR="$ROOT/.build/release"
 DIST="$ROOT/dist"
 STAGE="$DIST/stage"
 APP="$STAGE/$APP_NAME.app"
@@ -43,8 +42,23 @@ MSG
     exit 1
 fi
 
-echo "==> Building release binary"
+# A universal binary is built as two single-arch builds + lipo, rather than
+# `swift build --arch …` (which requires full Xcode's xcbuild). arm64 builds
+# natively; x86_64 cross-compiles via an explicit target triple.
+echo "==> Building arm64 slice (native)"
 swift build -c release
+ARM_BIN="$(swift build -c release --show-bin-path)/$APP_NAME"
+
+echo "==> Building x86_64 slice (cross-compile)"
+swift build -c release --scratch-path "$ROOT/.build-x86" \
+    -Xswiftc -target -Xswiftc x86_64-apple-macosx14.0 \
+    -Xcc -target -Xcc x86_64-apple-macosx14.0
+X86_BIN="$ROOT/.build-x86/release/$APP_NAME"
+
+echo "==> Merging into a universal binary (lipo)"
+UNIVERSAL_BIN="$ROOT/.build/$APP_NAME-universal"
+lipo -create "$ARM_BIN" "$X86_BIN" -output "$UNIVERSAL_BIN"
+echo "    architectures: $(lipo -archs "$UNIVERSAL_BIN")"
 
 echo "==> Preparing icon"
 if [ ! -f "$ICNS" ]; then
@@ -57,7 +71,7 @@ fi
 echo "==> Assembling $APP_NAME.app"
 rm -rf "$STAGE"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$RELEASE_DIR/$APP_NAME" "$APP/Contents/MacOS/$APP_NAME"
+cp "$UNIVERSAL_BIN" "$APP/Contents/MacOS/$APP_NAME"
 cp "$ICNS" "$APP/Contents/Resources/AppIcon.icns"
 
 cat > "$APP/Contents/Info.plist" <<PLIST

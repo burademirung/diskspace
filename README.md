@@ -3,7 +3,7 @@
 A free, native macOS menu-bar utility that shows free disk space at a glance and
 helps you find and reclaim large files and folders.
 
-![menu bar gauge](docs/screenshot.png)
+<p align="center"><img src="docs/icon.png" width="120" alt="DiskSpace icon"></p>
 
 ## Features
 
@@ -29,7 +29,14 @@ helps you find and reclaim large files and folders.
 **[⬇︎ Download the latest DiskSpace.dmg](../../releases/latest)**
 
 Open the DMG and drag **DiskSpace** to **Applications**. The build is signed and
-notarized by Apple, so it runs without Gatekeeper warnings — just open it.
+notarized by Apple, so it runs without Gatekeeper warnings — just open it. It's a
+**universal binary** (Apple Silicon + Intel), macOS 14+.
+
+### Homebrew
+
+```sh
+brew install --cask burademirung/tap/diskspace
+```
 
 ### Build from source
 
