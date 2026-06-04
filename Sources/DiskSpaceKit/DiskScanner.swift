@@ -1,11 +1,32 @@
 import Foundation
 import AppKit
+import os
 
 /// Running totals accumulated for a directory during a scan.
-private struct FolderAccumulator {
+private struct FolderAccumulator: Sendable {
     var size: Int64 = 0
     var count: Int = 0
     var date: Date = .distantPast
+}
+
+/// A partial scan result produced per-subtree and merged on the main walk.
+private struct FolderTotals: Sendable {
+    var folderSizes: [String: FolderAccumulator] = [:]
+    var files: [FileItem] = []
+
+    mutating func merge(_ other: FolderTotals) {
+        for (path, accumulator) in other.folderSizes {
+            if var existing = folderSizes[path] {
+                existing.size += accumulator.size
+                existing.count += accumulator.count
+                if accumulator.date > existing.date { existing.date = accumulator.date }
+                folderSizes[path] = existing
+            } else {
+                folderSizes[path] = accumulator
+            }
+        }
+        files.append(contentsOf: other.files)
+    }
 }
 
 @MainActor
@@ -44,7 +65,7 @@ public final class DiskScanner {
         scanTask = Task {
             let stream = AsyncStream<ScanUpdate> { continuation in
                 let scanWork = Task.detached {
-                    Self.performScan(
+                    await Self.performScan(
                         root: rootURL,
                         threshold: threshold,
                         continuation: continuation
@@ -126,47 +147,72 @@ public final class DiskScanner {
         root: URL,
         threshold: Int64,
         continuation: AsyncStream<ScanUpdate>.Continuation
-    ) {
+    ) async {
         let resolvedRoot = resolveSymlinks(root)
         let rootPath = resolvedRoot.path
-
-        guard let enumerator = FileManager.default.enumerator(
-            at: resolvedRoot,
-            includingPropertiesForKeys: Array(resourceKeys),
-            options: [],
-            errorHandler: { _, _ in true } // skip errors, keep going
-        ) else {
-            continuation.finish()
-            return
-        }
-
-        var files: [FileItem] = []
-        var folderSizes: [String: FolderAccumulator] = [:]
-        var scannedCount = 0
-
         // Skip other volumes / device nodes / VM swap only on a whole-disk scan;
         // a scoped scan (Home, a chosen folder, an external volume) scans fully.
         let applySystemSkips = (rootPath == "/")
 
-        for case let fileURL as URL in enumerator {
-            if Task.isCancelled { break }
+        // Split the top level: real subdirectories are walked in parallel;
+        // files directly in the root are handled inline. Symlinks are skipped
+        // (matching the enumerator's no-follow behavior — avoids walking, e.g.,
+        // /var and /private/var twice).
+        let topLevel = (try? FileManager.default.contentsOfDirectory(
+            at: resolvedRoot,
+            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+            options: []
+        )) ?? []
 
-            if applySystemSkips, skipPrefixes.contains(where: { fileURL.path.hasPrefix($0) }) {
-                enumerator.skipDescendants()
-                continue
+        var subdirs: [URL] = []
+        var merged = FolderTotals()
+        for url in topLevel {
+            let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            if values?.isSymbolicLink == true { continue }
+            if values?.isDirectory == true {
+                subdirs.append(url)
+            } else {
+                processEntry(fileURL: url, rootPath: rootPath, threshold: threshold,
+                             files: &merged.files, folderSizes: &merged.folderSizes)
             }
+        }
 
-            processEntry(
-                fileURL: fileURL,
-                rootPath: rootPath,
-                threshold: threshold,
-                files: &files,
-                folderSizes: &folderSizes
-            )
+        // Thread-safe progress counter shared across the parallel walks.
+        let progress = OSAllocatedUnfairLock(initialState: 0)
+        let report: @Sendable (Int) -> Void = { delta in
+            let total = progress.withLock { value -> Int in
+                value += delta
+                return value
+            }
+            continuation.yield(.progress(scannedCount: total))
+        }
 
-            scannedCount += 1
-            if scannedCount.isMultiple(of: 1000) {
-                continuation.yield(.progress(scannedCount: scannedCount))
+        // Bounded parallelism: APFS readdir takes a global kernel lock, so
+        // walks stop scaling past a handful of cores — start at the core count,
+        // cap at 64 (see docs/RESEARCH-scan-speedup.md).
+        let maxConcurrent = min(64, max(4, ProcessInfo.processInfo.activeProcessorCount))
+
+        await withTaskGroup(of: FolderTotals.self) { group in
+            var next = 0
+            let seed = min(maxConcurrent, subdirs.count)
+            while next < seed {
+                let dir = subdirs[next]
+                group.addTask {
+                    walkSubtree(dir, rootPath: rootPath, threshold: threshold,
+                                applySystemSkips: applySystemSkips, report: report)
+                }
+                next += 1
+            }
+            for await partial in group {
+                merged.merge(partial)
+                if next < subdirs.count, !Task.isCancelled {
+                    let dir = subdirs[next]
+                    group.addTask {
+                        walkSubtree(dir, rootPath: rootPath, threshold: threshold,
+                                    applySystemSkips: applySystemSkips, report: report)
+                    }
+                    next += 1
+                }
             }
         }
 
@@ -174,8 +220,45 @@ public final class DiskScanner {
             continuation.finish()
             return
         }
+        emitResults(files: merged.files, folderSizes: merged.folderSizes, continuation: continuation)
+    }
 
-        emitResults(files: files, folderSizes: folderSizes, continuation: continuation)
+    /// Walk one subtree sequentially (the proven single-threaded path),
+    /// accumulating into a local result that the caller merges. Ancestor sizes
+    /// are accumulated up to the global `rootPath`, so shared ancestors sum
+    /// correctly when partial results are merged.
+    nonisolated private static func walkSubtree(
+        _ subtreeRoot: URL,
+        rootPath: String,
+        threshold: Int64,
+        applySystemSkips: Bool,
+        report: @Sendable (Int) -> Void
+    ) -> FolderTotals {
+        var result = FolderTotals()
+        guard let enumerator = FileManager.default.enumerator(
+            at: subtreeRoot,
+            includingPropertiesForKeys: Array(resourceKeys),
+            options: [],
+            errorHandler: { _, _ in true }
+        ) else { return result }
+
+        var localCount = 0
+        for case let fileURL as URL in enumerator {
+            if Task.isCancelled { break }
+            if applySystemSkips, skipPrefixes.contains(where: { fileURL.path.hasPrefix($0) }) {
+                enumerator.skipDescendants()
+                continue
+            }
+            processEntry(fileURL: fileURL, rootPath: rootPath, threshold: threshold,
+                         files: &result.files, folderSizes: &result.folderSizes)
+            localCount += 1
+            if localCount >= 1000 {
+                report(localCount)
+                localCount = 0
+            }
+        }
+        if localCount > 0 { report(localCount) }
+        return result
     }
 
     /// Resolve symlinks (e.g., /var -> /private/var) so paths from
