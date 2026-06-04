@@ -63,18 +63,21 @@ extension PopoverViewController {
         sizeCol.title = "Size"
         sizeCol.width = 78
         sizeCol.minWidth = 60
+        sizeCol.sortDescriptorPrototype = NSSortDescriptor(key: "size", ascending: false)
         tableView.addTableColumn(sizeCol)
 
         let dateCol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("date"))
         dateCol.title = "Modified"
         dateCol.width = 78
         dateCol.minWidth = 60
+        dateCol.sortDescriptorPrototype = NSSortDescriptor(key: "date", ascending: false)
         tableView.addTableColumn(dateCol)
 
         let pathCol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("path"))
         pathCol.title = "Path"
         pathCol.width = 210
         pathCol.minWidth = 120
+        pathCol.sortDescriptorPrototype = NSSortDescriptor(key: "name", ascending: true)
         tableView.addTableColumn(pathCol)
 
         tableView.dataSource = self
@@ -85,6 +88,9 @@ extension PopoverViewController {
         tableView.headerView = NSTableHeaderView()
         tableView.target = self
         tableView.doubleAction = #selector(rowDoubleClicked(_:))
+        tableView.onToggleRow = { [weak self] row in
+            self?.toggleCheck(forRow: row)
+        }
 
         let contextMenu = NSMenu()
         contextMenu.addItem(
@@ -94,11 +100,25 @@ extension PopoverViewController {
                 keyEquivalent: ""
             )
         )
+        contextMenu.addItem(.separator())
+        contextMenu.addItem(
+            NSMenuItem(title: "Scan Parent Folder", action: #selector(scanParentFolder(_:)), keyEquivalent: "")
+        )
+        contextMenu.addItem(
+            NSMenuItem(title: "Scan Whole Disk", action: #selector(scanWholeDisk(_:)), keyEquivalent: "")
+        )
         tableView.menu = contextMenu
 
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
+    }
+
+    func setupEmptyState() {
+        emptyLabel.font = .systemFont(ofSize: 12)
+        emptyLabel.textColor = .tertiaryLabelColor
+        emptyLabel.alignment = .center
+        emptyLabel.isHidden = true
     }
 
     func setupStatusBar() {
@@ -121,7 +141,7 @@ extension PopoverViewController {
         let views: [NSView] = [
             fdaBanner, summaryBar, summaryLabel, tabControl, thresholdLabel,
             thresholdPicker, sortLabel, sortPicker, searchField, scrollView,
-            statusLabel, scanButton, cancelButton, deleteButton
+            statusLabel, scanButton, cancelButton, deleteButton, emptyLabel
         ]
         for subview in views {
             subview.translatesAutoresizingMaskIntoConstraints = false
@@ -191,7 +211,12 @@ extension PopoverViewController {
             deleteButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -pad),
             deleteButton.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -pad),
 
-            scrollView.bottomAnchor.constraint(equalTo: deleteButton.topAnchor, constant: -smallPad)
+            scrollView.bottomAnchor.constraint(equalTo: deleteButton.topAnchor, constant: -smallPad),
+
+            emptyLabel.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
+            emptyLabel.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
+            emptyLabel.leadingAnchor.constraint(greaterThanOrEqualTo: scrollView.leadingAnchor, constant: pad),
+            emptyLabel.trailingAnchor.constraint(lessThanOrEqualTo: scrollView.trailingAnchor, constant: -pad)
         ])
     }
 

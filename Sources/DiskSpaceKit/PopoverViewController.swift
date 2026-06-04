@@ -32,7 +32,8 @@ public final class PopoverViewController: NSViewController,
 
     // Table + status
     let scrollView = NSScrollView()
-    let tableView = NSTableView()
+    let tableView = CheckboxTableView()
+    let emptyLabel = NSTextField(labelWithString: "")
     let statusLabel = NSTextField(labelWithString: "Ready")
     let scanButton = NSButton(title: "Scan", target: nil, action: nil)
     let cancelButton = NSButton(title: "Cancel", target: nil, action: nil)
@@ -71,6 +72,7 @@ public final class PopoverViewController: NSViewController,
         setupSummary()
         setupToolbar()
         setupTable()
+        setupEmptyState()
         setupStatusBar()
         layoutSubviews()
         wireActions()
@@ -171,6 +173,61 @@ public final class PopoverViewController: NSViewController,
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
+    @objc func scanParentFolder(_ sender: Any?) {
+        // "Back" from a drill-down: scan the parent, or reset to whole disk
+        // once we reach the volume root.
+        let volumeRoot = ScanRootResolver.monitoredVolumeURL(preferences: preferences).path
+        guard preferences.scanScope == .custom,
+              let path = preferences.customScanPath else {
+            scanWholeDisk(sender)
+            return
+        }
+        let parent = (path as NSString).deletingLastPathComponent
+        if parent == path || parent == "/" || parent == volumeRoot || !parent.hasPrefix(volumeRoot) {
+            scanWholeDisk(sender)
+        } else {
+            preferences.customScanPath = parent
+            checkedURLs.removeAll()
+            startScopedScan()
+        }
+    }
+
+    @objc func scanWholeDisk(_ sender: Any?) {
+        preferences.scanScope = .wholeDisk
+        checkedURLs.removeAll()
+        startScopedScan()
+    }
+
+    func toggleCheck(forRow row: Int) {
+        guard let url = urlAt(row: row) else { return }
+        if checkedURLs.contains(url) {
+            checkedURLs.remove(url)
+        } else {
+            checkedURLs.insert(url)
+        }
+        updateDeleteButton()
+        tableView.reloadData(forRowIndexes: IndexSet(integer: row),
+                             columnIndexes: IndexSet(integer: 0))
+    }
+
+    // MARK: - Column sorting
+
+    public func tableView(_ tableView: NSTableView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]) {
+        guard let key = tableView.sortDescriptors.first?.key else { return }
+        let mode: SortMode
+        switch key {
+        case "size": mode = .size
+        case "date": mode = .date
+        case "name": mode = .name
+        default: return
+        }
+        preferences.sortMode = mode
+        if let index = SortMode.allCases.firstIndex(of: mode) {
+            sortPicker.selectItem(at: index)
+        }
+        filterAndReload()
+    }
+
     @objc func checkboxToggled(_ sender: NSButton) {
         guard let url = urlAt(row: sender.tag) else { return }
         if sender.state == .on {
@@ -186,54 +243,6 @@ public final class PopoverViewController: NSViewController,
     private func startScopedScan() {
         scanner.setMinimumFileSize(preferences.minimumFileSize)
         scanner.startScan(rootURL: ScanRootResolver.resolve(preferences: preferences))
-    }
-
-    // MARK: - Destructive actions
-
-    private func performTrash() {
-        guard !checkedURLs.isEmpty else { return }
-        let count = checkedURLs.count
-
-        let alert = NSAlert()
-        alert.messageText = "Move \(count) item\(count == 1 ? "" : "s") to Trash?"
-        alert.informativeText = "You can recover them from Trash later."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Move to Trash")
-        alert.addButton(withTitle: "Cancel")
-
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-
-        scanner.deleteItems(Array(checkedURLs))
-        checkedURLs.removeAll()
-        updateDeleteButton()
-    }
-
-    private func performCleanup() {
-        let selected = cleanupRows.filter { checkedURLs.contains($0.target.url) }
-        guard !selected.isEmpty else { return }
-        let hasPermanent = selected.contains { $0.target.isPermanent }
-
-        let alert = NSAlert()
-        alert.messageText = "Clean \(selected.count) location\(selected.count == 1 ? "" : "s")?"
-        alert.informativeText = hasPermanent
-            ? "Emptying the Trash is permanent. Other items are moved to the Trash and can be recovered."
-            : "Items are moved to the Trash; you can recover them later."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Clean")
-        alert.addButton(withTitle: "Cancel")
-
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-
-        for row in selected {
-            if row.target.isPermanent {
-                try? Cleanup.emptyTrash()
-            } else {
-                scanner.deleteItems(Cleanup.contents(of: row.target.url))
-            }
-        }
-        checkedURLs.removeAll()
-        updateDeleteButton()
-        loadCleanup()
     }
 
     // MARK: - Data updates
@@ -297,6 +306,7 @@ public final class PopoverViewController: NSViewController,
         checkedURLs.formIntersection(validURLs)
         updateDeleteButton()
         tableView.reloadData()
+        updateEmptyState()
     }
 
     private func sortFiles(_ items: [FileItem]) -> [FileItem] {
@@ -319,40 +329,6 @@ public final class PopoverViewController: NSViewController,
         }
     }
 
-    func loadCleanup() {
-        var rows = Cleanup.standardTargets().map { CleanupRow(target: $0, size: 0) }
-        let nodeModules = scanner.largeFolders.filter { $0.url.lastPathComponent == "node_modules" }
-        rows += nodeModules.map {
-            CleanupRow(
-                target: CleanupTarget(
-                    name: "node_modules", url: $0.url, detail: $0.displayPath, isPermanent: false
-                ),
-                size: $0.totalSize
-            )
-        }
-        cleanupRows = rows
-        checkedURLs.formIntersection(Set(rows.map(\.target.url)))
-        updateDeleteButton()
-        tableView.reloadData()
-        computeCleanupSizes()
-    }
-
-    private func computeCleanupSizes() {
-        for index in cleanupRows.indices where cleanupRows[index].size == 0 {
-            let url = cleanupRows[index].target.url
-            Task.detached {
-                let size = Cleanup.directorySize(url)
-                await MainActor.run { [weak self] in
-                    guard let self,
-                          index < self.cleanupRows.count,
-                          self.cleanupRows[index].target.url == url else { return }
-                    self.cleanupRows[index].size = size
-                    if self.currentTab == .cleanup { self.tableView.reloadData() }
-                }
-            }
-        }
-    }
-
     func updateFDABanner() {
         let granted = DiskAccess.hasFullDiskAccess()
         fdaBanner.isHidden = granted
@@ -364,6 +340,23 @@ public final class PopoverViewController: NSViewController,
         deleteButton.isEnabled = count > 0
         let verb = currentTab == .cleanup ? "Clean Up" : "Move to Trash"
         deleteButton.title = count > 0 ? "\(verb) (\(count))" : verb
+    }
+
+    func updateEmptyState() {
+        let isEmpty = numberOfRows(in: tableView) == 0
+        emptyLabel.isHidden = !isEmpty
+        guard isEmpty else { return }
+        if scanner.scanState.isScanning {
+            emptyLabel.stringValue = "Scanning…"
+        } else if currentTab == .cleanup {
+            emptyLabel.stringValue = "No reclaimable locations found."
+        } else if !searchText.isEmpty {
+            emptyLabel.stringValue = "No items match “\(searchText)”."
+        } else if case .idle = scanner.scanState {
+            emptyLabel.stringValue = "Click Scan to find large items."
+        } else {
+            emptyLabel.stringValue = "No items found."
+        }
     }
 
     // MARK: - Helpers
