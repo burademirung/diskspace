@@ -76,14 +76,12 @@ struct DiskScannerTests {
 
         let folders = await scanner.largeFolders
         // root folder should have total size >= 100 + 60M + 30M + 200M (allocated sizes may be larger)
-        let rootFolder = folders.first { $0.url.path == root.path }
-        #expect(rootFolder != nil)
-        #expect(rootFolder!.totalSize >= 290_000_100)
+        let rootFolder = try #require(folders.first { $0.url.path == root.path })
+        #expect(rootFolder.totalSize >= 290_000_100)
 
         // subdir should have >= 30M + 200M = 230M
-        let subFolder = folders.first { $0.url.path == root.appendingPathComponent("subdir").path }
-        #expect(subFolder != nil)
-        #expect(subFolder!.totalSize >= 230_000_000)
+        let subFolder = try #require(folders.first { $0.url.path == root.appendingPathComponent("subdir").path })
+        #expect(subFolder.totalSize >= 230_000_000)
     }
 
     @Test("Scanner reports done state with correct counts")
@@ -146,5 +144,8 @@ struct DiskScannerTests {
         let files = await scanner.largeFiles
         #expect(files.count == 1)
         #expect(files[0].size >= 200_000_000)
+
+        // The results record the threshold they were collected at.
+        #expect(await scanner.scannedThreshold == 100_000_000)
     }
 }

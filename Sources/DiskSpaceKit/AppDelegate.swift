@@ -1,6 +1,5 @@
 // Sources/DiskSpaceKit/AppDelegate.swift
 import AppKit
-import ServiceManagement
 
 @MainActor
 public final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -39,6 +38,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         button.target = self
         button.action = #selector(statusBarClicked(_:))
+        button.setAccessibilityLabel("DiskSpace — free disk space")
 
         // Ensure button sends action on click rather than showing a menu
         statusItem?.menu = nil

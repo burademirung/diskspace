@@ -9,6 +9,11 @@ public final class DiskScanner {
     public private(set) var scanState: ScanState = .idle
     public private(set) var minimumFileSize: Int64 = 50_000_000 // 50 MB
 
+    /// The minimum file size the current results were collected at. Lowering
+    /// the UI threshold below this requires a fresh scan, since smaller files
+    /// were never gathered. 0 means no scan has run yet.
+    public private(set) var scannedThreshold: Int64 = 0
+
     public var onUpdate: (@MainActor () -> Void)?
 
     private var scanTask: Task<Void, Never>?
@@ -27,6 +32,7 @@ public final class DiskScanner {
         onUpdate?()
 
         let threshold = minimumFileSize
+        scannedThreshold = threshold
 
         scanTask = Task {
             let stream = AsyncStream<ScanUpdate> { continuation in
@@ -80,8 +86,15 @@ public final class DiskScanner {
                     return
                 }
                 let deletedPaths = Set(urls.map(\.path))
-                self.largeFiles.removeAll { deletedPaths.contains($0.url.path) }
-                self.largeFolders.removeAll { deletedPaths.contains($0.url.path) }
+                func isDeletedOrDescendant(_ path: String) -> Bool {
+                    deletedPaths.contains(path)
+                        || deletedPaths.contains { path.hasPrefix($0 + "/") }
+                }
+                // Drop deleted items and any descendants of deleted folders.
+                // Surviving ancestor folder totals stay approximate until the
+                // next scan.
+                self.largeFiles.removeAll { isDeletedOrDescendant($0.url.path) }
+                self.largeFolders.removeAll { isDeletedOrDescendant($0.url.path) }
                 self.onUpdate?()
             }
         }
@@ -199,12 +212,16 @@ public final class DiskScanner {
         rootPath: String,
         into folderSizes: inout [String: (size: Int64, count: Int)]
     ) {
+        // Match on a path-boundary ("rootPath/") so a sibling like
+        // "/x/foobar" is not mistaken for a child of root "/x/foo".
+        let rootBoundary = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
         var dirPath = fileURL.deletingLastPathComponent().path
-        while dirPath.hasPrefix(rootPath) && !dirPath.isEmpty {
+        while dirPath == rootPath || dirPath.hasPrefix(rootBoundary) {
             var entry = folderSizes[dirPath, default: (size: 0, count: 0)]
             entry.size += fileSize
             entry.count += 1
             folderSizes[dirPath] = entry
+            if dirPath == rootPath { break } // don't ascend past the scan root
             let parent = (dirPath as NSString).deletingLastPathComponent
             if parent == dirPath { break }
             dirPath = parent

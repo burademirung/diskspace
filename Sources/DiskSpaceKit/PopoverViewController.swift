@@ -45,7 +45,7 @@ public final class PopoverViewController: NSViewController,
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     public override func loadView() {
         view = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 520))
@@ -81,7 +81,14 @@ public final class PopoverViewController: NSViewController,
         guard idx >= 0 && idx < thresholdOptions.count else { return }
         let newThreshold = thresholdOptions[idx].bytes
         scanner.setMinimumFileSize(newThreshold)
-        filterAndReload()
+        // Files below the scanned threshold were never collected, so lowering
+        // the threshold needs a fresh scan; raising it can filter in place.
+        if newThreshold < scanner.scannedThreshold {
+            checkedURLs.removeAll()
+            scanner.startScan()
+        } else {
+            filterAndReload()
+        }
     }
 
     @objc func scanTapped(_ sender: Any?) {
@@ -168,7 +175,8 @@ public final class PopoverViewController: NSViewController,
 
     func filterAndReload() {
         let threshold = scanner.minimumFileSize
-        // Client-side filter: raising threshold hides files; lowering requires re-scan
+        // Client-side filter for raising the threshold; lowering triggers a
+        // re-scan in thresholdChanged (smaller files were never collected).
         displayedFiles = scanner.largeFiles.filter { $0.size >= threshold }
         displayedFolders = scanner.largeFolders
 

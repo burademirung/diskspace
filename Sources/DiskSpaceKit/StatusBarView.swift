@@ -3,7 +3,7 @@ import AppKit
 
 public final class StatusBarView: NSView {
 
-    public var diskInfo: DiskInfo = DiskInfo(totalBytes: 1, availableBytes: 1) {
+    public var diskInfo = DiskInfo(totalBytes: 1, availableBytes: 1) {
         didSet { needsDisplay = true }
     }
 
