@@ -3,6 +3,8 @@
 A free, native macOS menu-bar utility that shows free disk space at a glance and
 helps you find and reclaim large files and folders.
 
+**Universal binary** — runs natively on both Apple Silicon and Intel Macs, macOS 14+.
+
 <p align="center"><img src="https://raw.githubusercontent.com/burademirung/diskspace/master/docs/icon.png" width="120" alt="DiskSpace icon"></p>
 
 ## Features
